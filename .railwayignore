@@ -1,0 +1,12 @@
+.git
+node_modules
+dist
+.env
+.env.*
+*.log
+.DS_Store
+.tmp
+coverage
+.vscode
+.cursor
+README.md
