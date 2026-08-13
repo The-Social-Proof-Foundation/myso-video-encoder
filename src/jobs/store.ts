@@ -12,6 +12,7 @@ export function stablePayloadHash(req: EncoderJobRequest): string {
     profile: req.profile,
     output: req.output,
     callbackUrl: req.callbackUrl,
+    watermark: req.watermark ?? null,
   });
   return sha256Hex(canonical);
 }

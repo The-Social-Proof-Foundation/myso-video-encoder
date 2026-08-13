@@ -2,6 +2,8 @@ import { getConfig } from '../config';
 import { EncoderJobRequest } from '../types';
 import { JobStore } from './store';
 import { runEncodeJob } from '../pipeline/runJob';
+import { runExportJob } from '../pipeline/runExportJob';
+import { EXPORT_PROFILE } from '../types';
 
 type QueueItem = {
   encoderJobId: string;
@@ -37,7 +39,11 @@ export class JobWorker {
   private async runOne(item: QueueItem): Promise<void> {
     this.store.updateStatus(item.request.jobId, 'running');
     try {
-      await runEncodeJob(item.encoderJobId, item.request);
+      if (item.request.profile === EXPORT_PROFILE) {
+        await runExportJob(item.encoderJobId, item.request);
+      } else {
+        await runEncodeJob(item.encoderJobId, item.request);
+      }
       this.store.updateStatus(item.request.jobId, 'succeeded');
     } catch (err) {
       const code = err && typeof err === 'object' && 'errorCode' in err ? String((err as { errorCode: string }).errorCode) : 'ENCODE_FAILED';

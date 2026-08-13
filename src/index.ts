@@ -3,7 +3,7 @@ import express from 'express';
 import { getConfig } from './config';
 import { JobStore, stablePayloadHash } from './jobs/store';
 import { JobWorker } from './jobs/worker';
-import { EncoderJobRequest, PROFILE } from './types';
+import { EncoderJobRequest, EXPORT_PROFILE, PROFILE } from './types';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -43,20 +43,34 @@ app.post('/v1/jobs', (req, res) => {
       prefix: String(body.output?.prefix || ''),
     },
     callbackUrl: String(body.callbackUrl || ''),
+    watermark: body.watermark?.label
+      ? { label: String(body.watermark.label) }
+      : undefined,
   };
 
   if (request.jobId !== idempotencyKey) {
     res.status(400).json({ error: 'Idempotency-Key must equal jobId' });
     return;
   }
-  if (request.profile !== PROFILE) {
-    res.status(400).json({ error: `Unsupported profile (expected ${PROFILE})` });
+
+  if (request.profile === EXPORT_PROFILE) {
+    const expectedPrefix = `${request.assetId}/export/`;
+    if (request.output.prefix !== expectedPrefix) {
+      res.status(400).json({ error: 'output.prefix must be {assetId}/export/' });
+      return;
+    }
+    if (!request.watermark?.label?.trim()) {
+      res.status(400).json({ error: 'watermark.label is required for export profile' });
+      return;
+    }
+  } else if (request.profile !== PROFILE) {
+    res.status(400).json({ error: `Unsupported profile (expected ${PROFILE} or ${EXPORT_PROFILE})` });
     return;
-  }
-  if (request.output.prefix !== `${request.assetId}/`) {
+  } else if (request.output.prefix !== `${request.assetId}/`) {
     res.status(400).json({ error: 'output.prefix must be {assetId}/' });
     return;
   }
+
   if (!request.assetId || !request.sourceUrl || !request.callbackUrl || !request.output.bucket) {
     res.status(400).json({ error: 'Missing required fields' });
     return;

@@ -1,4 +1,9 @@
 export const PROFILE = 'dripdrop-social-v1' as const;
+export const EXPORT_PROFILE = 'dripdrop-export-v1' as const;
+
+export interface WatermarkSpec {
+  label: string;
+}
 
 export interface EncoderJobRequest {
   jobId: string;
@@ -11,6 +16,7 @@ export interface EncoderJobRequest {
     prefix: string;
   };
   callbackUrl: string;
+  watermark?: WatermarkSpec;
 }
 
 export type JobStatus = 'accepted' | 'running' | 'succeeded' | 'failed';
@@ -57,6 +63,20 @@ export interface EncoderFailureCallback {
   errorCode: string;
   retryable: boolean;
 }
+
+export interface EncoderExportSuccessCallback {
+  eventId: string;
+  jobId: string;
+  encoderJobId: string;
+  assetId: string;
+  status: 'succeeded';
+  exportKey: string;
+  durationMs: number;
+  width: number;
+  height: number;
+}
+
+export type EncoderExportFailureCallback = EncoderFailureCallback;
 
 export class EncodeError extends Error {
   readonly errorCode: string;

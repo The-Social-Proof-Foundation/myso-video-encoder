@@ -19,6 +19,15 @@ export interface EncoderConfig {
   maxDurationSec: number;
   ffmpegPath: string;
   ffprobePath: string;
+  watermarkLogoPath: string;
+  watermarkLogoUrl: string;
+  watermarkLogoWidth: number;
+  watermarkFontPath: string;
+  watermarkCycleSec: number;
+  watermarkFadeSec: number;
+  watermarkHoldSec: number;
+  watermarkGapSec: number;
+  watermarkPaddingPx: number;
 }
 
 function parseKeyRing(raw: string | undefined): HmacKeyRing {
@@ -62,6 +71,16 @@ export function loadConfig(): EncoderConfig {
     maxDurationSec: intEnv('ENCODER_MAX_DURATION_SEC', 180),
     ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
     ffprobePath: process.env.FFPROBE_PATH || 'ffprobe',
+    watermarkLogoPath: process.env.WATERMARK_LOGO_PATH || './assets/logo-watermark.png',
+    watermarkLogoUrl: process.env.WATERMARK_LOGO_URL || '',
+    watermarkLogoWidth: intEnv('WATERMARK_LOGO_WIDTH', 160),
+    watermarkFontPath:
+      process.env.WATERMARK_FONT_PATH || '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    watermarkCycleSec: Number(process.env.WATERMARK_CYCLE_SEC || 5),
+    watermarkFadeSec: Number(process.env.WATERMARK_FADE_SEC || 0.4),
+    watermarkHoldSec: Number(process.env.WATERMARK_HOLD_SEC || 3.5),
+    watermarkGapSec: Number(process.env.WATERMARK_GAP_SEC || 0.7),
+    watermarkPaddingPx: Number(process.env.WATERMARK_PADDING_PX || 24),
   };
 }
 

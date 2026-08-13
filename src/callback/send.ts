@@ -1,12 +1,12 @@
 import { getConfig } from '../config';
-import { EncoderFailureCallback, EncoderSuccessCallback } from '../types';
+import { EncoderExportSuccessCallback, EncoderFailureCallback, EncoderSuccessCallback } from '../types';
 import { buildSignedHeaders } from './hmac';
 
 const MAX_ATTEMPTS = 5;
 
 export async function sendCallback(
   callbackUrl: string,
-  payload: EncoderSuccessCallback | EncoderFailureCallback,
+  payload: EncoderSuccessCallback | EncoderExportSuccessCallback | EncoderFailureCallback,
 ): Promise<void> {
   const cfg = getConfig();
   const rawBody = JSON.stringify(payload);

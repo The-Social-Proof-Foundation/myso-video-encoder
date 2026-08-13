@@ -29,6 +29,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
+COPY assets ./assets
 
 RUN mkdir -p /tmp/encoder && chown -R nodejs:nodejs /app /tmp/encoder
 USER nodejs
