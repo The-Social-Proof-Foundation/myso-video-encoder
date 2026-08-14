@@ -5,6 +5,13 @@ import { JobStore, stablePayloadHash } from './jobs/store';
 import { JobWorker } from './jobs/worker';
 import { EncoderJobRequest, EXPORT_PROFILE, PROFILE } from './types';
 
+const STALE_RUNNING_MS = Math.max(30_000, Number(process.env.ENCODER_STALE_RUNNING_MS || 60_000));
+
+function isStaleRunningJob(job: { status: string; updatedAt: string }): boolean {
+  if (job.status !== 'running') return false;
+  return Date.now() - new Date(job.updatedAt).getTime() > STALE_RUNNING_MS;
+}
+
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
@@ -54,9 +61,9 @@ app.post('/v1/jobs', (req, res) => {
   }
 
   if (request.profile === EXPORT_PROFILE) {
-    const expectedPrefix = `${request.assetId}/export/`;
+    const expectedPrefix = `${request.assetId}/`;
     if (request.output.prefix !== expectedPrefix) {
-      res.status(400).json({ error: 'output.prefix must be {assetId}/export/' });
+      res.status(400).json({ error: 'output.prefix must be {assetId}/' });
       return;
     }
     if (!request.watermark?.label?.trim()) {
@@ -80,13 +87,38 @@ app.post('/v1/jobs', (req, res) => {
   const hash = stablePayloadHash(request);
   if (existing) {
     if (existing.payloadHash !== hash) {
+      const canReplace =
+        existing.status === 'failed' ||
+        existing.status === 'succeeded' ||
+        isStaleRunningJob(existing);
+      if (canReplace) {
+        if (isStaleRunningJob(existing)) {
+          console.warn('[encoder] retrying stale running job (payload changed)', existing.jobId);
+          store.updateStatus(existing.jobId, 'failed', 'STALE_RUNNING');
+        } else {
+          console.warn('[encoder] replacing job payload and retrying', existing.jobId);
+        }
+        const retried = store.prepareRetry(idempotencyKey, request);
+        worker.enqueue(existing.encoderJobId, request);
+        res.status(202).json({
+          encoderJobId: existing.encoderJobId,
+          jobId: existing.jobId,
+          status: retried?.status || 'accepted',
+        });
+        return;
+      }
       res.status(409).json({ error: 'Idempotency conflict' });
       return;
     }
     // Failed jobs (including orphans marked failed on process restart) retry with fresh source URL.
-    if (existing.status === 'failed') {
+    if (existing.status === 'failed' || isStaleRunningJob(existing)) {
+      if (isStaleRunningJob(existing)) {
+        console.warn('[encoder] retrying stale running job', existing.jobId);
+        store.updateStatus(existing.jobId, 'failed', 'STALE_RUNNING');
+      }
       const retried = store.prepareRetry(idempotencyKey, request);
       worker.enqueue(existing.encoderJobId, request);
+      console.log('[encoder] export job accepted (retry)', existing.jobId);
       res.status(202).json({
         encoderJobId: existing.encoderJobId,
         jobId: existing.jobId,
@@ -108,6 +140,7 @@ app.post('/v1/jobs', (req, res) => {
   // Capture accept status before the worker mutates the store.
   const acceptedStatus = job.status;
   worker.enqueue(encoderJobId, request);
+  console.log('[encoder] export job accepted', request.profile, request.jobId);
 
   res.status(202).json({
     encoderJobId: job.encoderJobId,

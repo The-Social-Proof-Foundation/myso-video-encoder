@@ -73,12 +73,12 @@ export function loadConfig(): EncoderConfig {
     ffprobePath: process.env.FFPROBE_PATH || 'ffprobe',
     watermarkLogoPath: process.env.WATERMARK_LOGO_PATH || './assets/logo-watermark.png',
     watermarkLogoUrl: process.env.WATERMARK_LOGO_URL || '',
-    watermarkLogoWidth: intEnv('WATERMARK_LOGO_WIDTH', 160),
+    watermarkLogoWidth: intEnv('WATERMARK_LOGO_WIDTH', 220),
     watermarkFontPath:
       process.env.WATERMARK_FONT_PATH || '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     watermarkCycleSec: Number(process.env.WATERMARK_CYCLE_SEC || 5),
     watermarkFadeSec: Number(process.env.WATERMARK_FADE_SEC || 0.4),
-    watermarkHoldSec: Number(process.env.WATERMARK_HOLD_SEC || 3.5),
+    watermarkHoldSec: Number(process.env.WATERMARK_HOLD_SEC || 3.9),
     watermarkGapSec: Number(process.env.WATERMARK_GAP_SEC || 0.7),
     watermarkPaddingPx: Number(process.env.WATERMARK_PADDING_PX || 24),
   };

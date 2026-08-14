@@ -12,7 +12,14 @@ import {
   EXPORT_PROFILE,
 } from '../types';
 import { downloadSource } from './download';
-import { encodeWatermarkedExport, renderWatermarkStrip } from './exportEncode';
+import {
+  encodeWatermarkedExport,
+  finalizeWatermarkedExport,
+  renderWatermarkStrip,
+  WATERMARKED_EXPORT_FILENAME,
+  watermarkedExportTempPath,
+} from './exportEncode';
+import { validateExportMp4 } from './exportValidate';
 import { resolveWatermarkLogoPath } from './watermarkLogo';
 import { probeSource } from './probe';
 
@@ -20,7 +27,7 @@ function assertExportRequestShape(req: EncoderJobRequest): void {
   if (req.profile !== EXPORT_PROFILE) {
     throw new EncodeError('PROFILE_UNSUPPORTED', `Unsupported profile ${req.profile}`, false);
   }
-  const expectedPrefix = `${req.assetId}/export/`;
+  const expectedPrefix = `${req.assetId}/`;
   if (req.output?.prefix !== expectedPrefix) {
     throw new EncodeError('VALIDATION_FAILED', `output.prefix must be ${expectedPrefix}`, false);
   }
@@ -80,15 +87,17 @@ export async function runExportJob(encoderJobId: string, req: EncoderJobRequest)
       logoPath,
     });
 
-    const outPath = path.join(workDir, 'watermarked.mp4');
+    const outPath = path.join(workDir, WATERMARKED_EXPORT_FILENAME);
     await encodeWatermarkedExport({
       sourcePath,
       watermarkStripPath,
       outPath,
       probe,
     });
+    await validateExportMp4(watermarkedExportTempPath(outPath), probe);
+    finalizeWatermarkedExport(outPath);
 
-    const exportKey = `${req.output.prefix}watermarked.mp4`;
+    const exportKey = `${req.output.prefix}${WATERMARKED_EXPORT_FILENAME}`;
     await uploadPrefix({
       bucket: req.output.bucket,
       prefix: req.output.prefix,

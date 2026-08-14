@@ -8,7 +8,7 @@
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test dist/callback/hmac.test.js dist/pipeline/ladder.test.js dist/pipeline/encode.bandwidth.test.js dist/pipeline/watermarkAnimation.test.js dist/pipeline/exportEncode.test.js dist/r2/upload.test.js dist/jobs/store.test.js",
+    "test": "npm run build && node --test dist/callback/hmac.test.js dist/pipeline/ladder.test.js dist/pipeline/encode.bandwidth.test.js dist/pipeline/watermarkAnimation.test.js dist/pipeline/exportEncode.test.js dist/pipeline/exportValidate.test.js dist/r2/upload.test.js dist/jobs/store.test.js",
     "smoke": "npm run build && node scripts/smoke-encode.mjs"
   },
   "engines": {

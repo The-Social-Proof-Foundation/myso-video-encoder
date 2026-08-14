@@ -13,23 +13,24 @@ export type WatermarkTiming = {
 export const DEFAULT_WATERMARK_TIMING: WatermarkTiming = {
   cycleSec: 5,
   fadeSec: 0.4,
-  holdSec: 3.5,
+  holdSec: 3.9,
   gapSec: 0.7,
   paddingPx: 24,
 };
 
-/** Alpha 0→1→0 with invisible gap between position cycles. */
-export function buildAlphaExpression(t: WatermarkTiming): string {
-  const { cycleSec, fadeSec, holdSec, gapSec } = t;
-  const fadeEnd = fadeSec;
-  const holdEnd = fadeSec + holdSec;
-  const fadeOutEnd = fadeEnd + holdSec + fadeSec;
-  // phase within cycle
-  const p = `mod(t,${cycleSec})`;
+/** Hold at full opacity, fade-out transition, gap — no fade-in at cycle start. */
+export function buildAlphaExpression(
+  t: WatermarkTiming,
+  /** overlay/filter uses `t`; geq uses `T` for timestamp. */
+  timeVar: 't' | 'T' = 't',
+): string {
+  const { cycleSec, fadeSec, holdSec } = t;
+  const fadeOutStart = holdSec;
+  const fadeOutEnd = holdSec + fadeSec;
+  const p = `mod(${timeVar},${cycleSec})`;
   return (
-    `if(lt(${p},${fadeEnd}),${p}/${fadeSec},` +
-    `if(lt(${p},${holdEnd}),1,` +
-    `if(lt(${p},${fadeOutEnd}),1-(${p}-${holdEnd})/${fadeSec},0)))`
+    `if(lt(${p},${fadeOutStart}),1,` +
+    `if(lt(${p},${fadeOutEnd}),1-(${p}-${fadeOutStart})/${fadeSec},0))`
   );
 }
 
@@ -37,15 +38,15 @@ function anchorCoord(index: number, axis: 'x' | 'y', padding: number): string {
   const p = String(padding);
   switch (index) {
     case 0:
-      return axis === 'x' ? p : p;
+      return axis === 'x' ? `W-w-${p}` : `(H-h)/2`;
     case 1:
       return axis === 'x' ? `W-w-${p}` : p;
     case 2:
-      return axis === 'x' ? p : `H-h-${p}`;
-    case 3:
       return axis === 'x' ? `W-w-${p}` : `H-h-${p}`;
+    case 3:
+      return axis === 'x' ? p : `H-h-${p}`;
     case 4:
-      return axis === 'x' ? `(W-w)/2` : p;
+      return axis === 'x' ? p : p;
     case 5:
       return axis === 'x' ? `(W-w)/2` : `H-h-${p}`;
     default:
@@ -63,12 +64,16 @@ function buildAxisExpression(axis: 'x' | 'y', t: WatermarkTiming): string {
 }
 
 export function buildOverlayExpressions(t: WatermarkTiming = DEFAULT_WATERMARK_TIMING): {
+  /** For overlay/colorchannelmixer-style filters (timestamp `t`). */
   alphaExpr: string;
+  /** For geq alpha channel (timestamp `T`). */
+  geqAlphaExpr: string;
   xExpr: string;
   yExpr: string;
 } {
   return {
-    alphaExpr: buildAlphaExpression(t),
+    alphaExpr: buildAlphaExpression(t, 't'),
+    geqAlphaExpr: buildAlphaExpression(t, 'T'),
     xExpr: buildAxisExpression('x', t),
     yExpr: buildAxisExpression('y', t),
   };
@@ -81,4 +86,9 @@ export function escapeDrawtext(text: string): string {
     .replace(/'/g, "\\'")
     .replace(/:/g, '\\:')
     .replace(/%/g, '\\%');
+}
+
+/** Escape commas so filter_complex option values are not split. */
+export function escapeFilterExpr(expr: string): string {
+  return expr.replace(/,/g, '\\,');
 }
