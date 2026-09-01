@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 /**
  * Local smoke: tiny fixture → encoder → mock callback → R2 streams.
- * Requires: ffmpeg, encoder .env with R2 + HMAC keys, encoder listening on PORT.
+ *
+ * Local encoder (default):
+ *   Requires ffmpeg, encoder .env with R2 + HMAC keys, encoder listening on PORT.
+ *   npm run smoke
+ *
+ * Remote Worker / Container:
+ *   ENCODER_BASE_URL=https://dripdrop-video-encoder.<subdomain>.workers.dev npm run smoke:remote
  */
 import http from 'http';
 import fs from 'fs';
@@ -12,6 +18,10 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
+const remote = process.argv.includes('--remote') || Boolean(process.env.ENCODER_BASE_URL);
+const encoderBaseUrl = remote
+  ? String(process.env.ENCODER_BASE_URL || '').replace(/\/$/, '')
+  : '';
 const port = Number(process.env.SMOKE_ENCODER_PORT || 8099);
 const srcPort = 8765;
 const cbPort = 8766;
@@ -71,29 +81,37 @@ async function main() {
   });
   await new Promise((r) => cbServer.listen(cbPort, '127.0.0.1', r));
 
-  const enc = spawn('node', ['dist/index.js'], {
-    cwd: root,
-    env: { ...process.env, PORT: String(port) },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  enc.stdout.on('data', (d) => process.stdout.write(`[enc] ${d}`));
-  enc.stderr.on('data', (d) => process.stderr.write(`[enc] ${d}`));
+  let enc = null;
+  if (!remote) {
+    enc = spawn('node', ['dist/index.js'], {
+      cwd: root,
+      env: { ...process.env, PORT: String(port) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    enc.stdout.on('data', (d) => process.stdout.write(`[enc] ${d}`));
+    enc.stderr.on('data', (d) => process.stderr.write(`[enc] ${d}`));
+  } else if (!encoderBaseUrl) {
+    throw new Error('Remote smoke requires ENCODER_BASE_URL');
+  }
+
+  const targetBase = remote ? encoderBaseUrl : `http://127.0.0.1:${port}`;
 
   async function waitHealth() {
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/health`);
+        const res = await fetch(`${targetBase}/health`);
         if (res.ok) return;
       } catch {
         /* retry */
       }
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, remote ? 1000 : 250));
     }
     throw new Error('encoder health timeout');
   }
 
   try {
     await waitHealth();
+    console.log('health ok', targetBase);
     const jobId = crypto.randomUUID();
     const assetId = `vid_smoke_${Date.now()}`;
     const body = {
@@ -108,7 +126,7 @@ async function main() {
       },
       callbackUrl: `http://127.0.0.1:${cbPort}/callback`,
     };
-    const submit = await fetch(`http://127.0.0.1:${port}/v1/jobs`, {
+    const submit = await fetch(`${targetBase}/v1/jobs`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -120,7 +138,8 @@ async function main() {
     console.log('submit', submit.status, submitJson);
     if (!submit.ok) throw new Error('submit failed');
 
-    for (let i = 0; i < 90; i++) {
+    const timeoutSec = remote ? 300 : 90;
+    for (let i = 0; i < timeoutSec; i++) {
       if (fs.existsSync(cbFile)) {
         const payload = JSON.parse(fs.readFileSync(cbFile, 'utf8'));
         console.log('final callback status', payload.status, payload.errorCode || payload.hlsUrl);
@@ -136,7 +155,7 @@ async function main() {
     console.error('callback timeout');
     process.exitCode = 1;
   } finally {
-    enc.kill('SIGTERM');
+    if (enc) enc.kill('SIGTERM');
     staticServer.close();
     cbServer.close();
     fs.rmSync(tmp, { recursive: true, force: true });

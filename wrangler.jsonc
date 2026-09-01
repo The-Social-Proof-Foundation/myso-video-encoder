@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dripdrop-video-encoder",
+  "account_id": "2450661c834d069620a78b7d99eb08b4",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "r2_buckets": [
+    {
+      "binding": "VIDEO_BUCKET",
+      "bucket_name": "dripdrop-video-streams-dev"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "VideoEncoder",
+      "image": "./Dockerfile",
+      "max_instances": 20
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VIDEO_ENCODER",
+        "class_name": "VideoEncoder"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["VideoEncoder"]
+    }
+  ],
+  "vars": {
+    "R2_REGION": "auto",
+    "ENCODER_TMP_DIR": "/tmp/encoder",
+    "ENCODER_MAX_CONCURRENT": "1"
+  }
+}
