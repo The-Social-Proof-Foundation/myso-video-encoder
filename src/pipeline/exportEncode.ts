@@ -1,14 +1,15 @@
 import fs from 'fs';
-import path from 'path';
 import { getConfig } from '../config';
 import { EncodeError, ProbeResult } from '../types';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
   buildOverlayExpressions,
+  buildWatermarkTimeline,
   DEFAULT_WATERMARK_TIMING,
   escapeDrawtext,
   escapeFilterExpr,
+  WatermarkSlot,
   WatermarkTiming,
 } from './watermarkAnimation';
 import { fpsFilterValue, gopFramesForFps, normalizeFps } from './probe';
@@ -18,7 +19,14 @@ const execFileAsync = promisify(execFile);
 /** Username row + padding below scaled logo (px). */
 export const WATERMARK_USERNAME_ROW_PX = 36;
 
-export const WATERMARKED_EXPORT_FILENAME = 'watermarked.mp4';
+export const WATERMARKED_EXPORT_FILENAME = 'watermarked-v2.mp4';
+
+export const EXPORT_END_CARD_SEC = 2;
+
+export const EXPORT_END_CARD_LOGO_WIDTH = 360;
+
+export const EXPORT_BODY_FILENAME = 'export-body.mp4';
+export const EXPORT_CARD_FILENAME = 'export-card.mp4';
 
 async function runFfmpeg(args: string[]): Promise<void> {
   const cfg = getConfig();
@@ -81,15 +89,20 @@ export function buildStackedWatermarkFilterComplex(params: {
 export function buildWatermarkedExportFilterComplex(
   timing: WatermarkTiming = DEFAULT_WATERMARK_TIMING,
   fps: number = 30,
+  timeline?: WatermarkSlot[],
 ): string {
-  const { geqAlphaExpr, xExpr, yExpr } = buildOverlayExpressions(timing);
+  const { geqAlphaExpr, xExpr, yExpr } = buildOverlayExpressions(timing, timeline);
   const fpsVal = fpsFilterValue(normalizeFps(fps));
   const a = escapeFilterExpr(geqAlphaExpr);
   return (
-    `[0:v]format=yuv420p,fps=${fpsVal}[base];` +
-    `[1:v]format=rgba,geq=r='r(X,Y)*(${a})':g='g(X,Y)*(${a})':b='b(X,Y)*(${a})':a='255*(${a})'[wm];` +
-    `[base][wm]overlay=x='${escapeFilterExpr(xExpr)}':y='${escapeFilterExpr(yExpr)}':eval=frame:format=auto:alpha=premultiplied[outv]`
+    `[0:v]format=gbrp,fps=${fpsVal}[base];` +
+    `[1:v]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(${a})'[wm];` +
+    `[base][wm]overlay=x='${escapeFilterExpr(xExpr)}':y='${escapeFilterExpr(yExpr)}':eval=frame:format=gbrp:alpha=straight,format=yuv420p[outv]`
   );
+}
+
+function audioEncodeArgs(): string[] {
+  return ['-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2'];
 }
 
 /** FFmpeg args for watermarked export encode (testable). */
@@ -99,11 +112,23 @@ export function buildWatermarkedExportFfmpegArgs(params: {
   outPath: string;
   probe: ProbeResult;
   timing?: WatermarkTiming;
+  timeline?: WatermarkSlot[];
 }): string[] {
   const timing = params.timing ?? DEFAULT_WATERMARK_TIMING;
   const fps = normalizeFps(params.probe.fps);
   const gop = gopFramesForFps(fps);
-  const filter = buildWatermarkedExportFilterComplex(timing, fps);
+  const timeline =
+    params.timeline ??
+    buildWatermarkTimeline({ durationSec: params.probe.durationSec, timing });
+  const filter = buildWatermarkedExportFilterComplex(timing, fps, timeline);
+  const duration = String(params.probe.durationSec);
+
+  const silentPad = params.probe.hasAudio
+    ? []
+    : ['-f', 'lavfi', '-t', duration, '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'];
+  const audioMap = params.probe.hasAudio
+    ? ['-map', '0:a:0?', ...audioEncodeArgs()]
+    : ['-map', '2:a:0', ...audioEncodeArgs()];
 
   return [
     '-y',
@@ -113,13 +138,12 @@ export function buildWatermarkedExportFfmpegArgs(params: {
     '1',
     '-i',
     params.watermarkStripPath,
+    ...silentPad,
     '-filter_complex',
     filter,
     '-map',
     '[outv]',
-    ...(params.probe.hasAudio
-      ? ['-map', '0:a:0?', '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2']
-      : ['-an']),
+    ...audioMap,
     '-c:v',
     'libx264',
     '-profile:v',
@@ -143,7 +167,7 @@ export function buildWatermarkedExportFfmpegArgs(params: {
     '-movflags',
     '+faststart',
     '-t',
-    String(params.probe.durationSec),
+    duration,
     '-shortest',
     '-f',
     'mp4',
@@ -151,9 +175,99 @@ export function buildWatermarkedExportFfmpegArgs(params: {
   ];
 }
 
+export function buildEndCardFilterComplex(): string {
+  return (
+    `[0:v]format=gbrp[base];` +
+    `[1:v]format=rgba[wm];` +
+    `[base][wm]overlay=x=(W-w)/2:y=(H-h)/2:format=gbrp:alpha=straight,format=yuv420p[outv]`
+  );
+}
+
+export function buildEndCardFfmpegArgs(params: {
+  watermarkStripPath: string;
+  chimePath: string;
+  outPath: string;
+  probe: ProbeResult;
+  durationSec?: number;
+}): string[] {
+  const duration = params.durationSec ?? EXPORT_END_CARD_SEC;
+  const fps = normalizeFps(params.probe.fps);
+  const fpsVal = fpsFilterValue(fps);
+  const gop = gopFramesForFps(fps);
+  const w = params.probe.width;
+  const h = params.probe.height;
+
+  return [
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    `color=c=black:s=${w}x${h}:d=${duration}:r=${fpsVal}`,
+    '-loop',
+    '1',
+    '-i',
+    params.watermarkStripPath,
+    '-i',
+    params.chimePath,
+    '-filter_complex',
+    buildEndCardFilterComplex(),
+    '-map',
+    '[outv]',
+    '-map',
+    '2:a:0',
+    ...audioEncodeArgs(),
+    '-af',
+    'apad',
+    '-c:v',
+    'libx264',
+    '-profile:v',
+    'high',
+    '-level',
+    '4.0',
+    '-pix_fmt',
+    'yuv420p',
+    '-colorspace',
+    'bt709',
+    '-color_primaries',
+    'bt709',
+    '-color_trc',
+    'bt709',
+    '-g',
+    String(gop),
+    '-preset',
+    'medium',
+    '-crf',
+    '21',
+    '-movflags',
+    '+faststart',
+    '-t',
+    String(duration),
+    '-shortest',
+    '-f',
+    'mp4',
+    params.outPath,
+  ];
+}
+
+export function buildConcatListContents(files: string[]): string {
+  return files.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join('\n') + '\n';
+}
+
 /** Temp path used during encode; rename to final after validation. */
 export function watermarkedExportTempPath(outPath: string): string {
   return `${outPath}.tmp`;
+}
+
+export function resolveWatermarkChimePath(): string {
+  const cfg = getConfig();
+  if (!cfg.watermarkChimePath || !fs.existsSync(cfg.watermarkChimePath)) {
+    throw new EncodeError(
+      'VALIDATION_FAILED',
+      `Watermark chime not found at ${cfg.watermarkChimePath || '(empty)'}`,
+      false,
+    );
+  }
+  return cfg.watermarkChimePath;
 }
 
 /** Render transparent PNG strip: brand logo + creator label stacked vertically. */
@@ -161,6 +275,7 @@ export async function renderWatermarkStrip(params: {
   outPath: string;
   label: string;
   logoPath?: string;
+  logoWidth?: number;
 }): Promise<void> {
   const cfg = getConfig();
   const logoPath = params.logoPath || cfg.watermarkLogoPath;
@@ -174,7 +289,7 @@ export async function renderWatermarkStrip(params: {
 
   const filter = buildStackedWatermarkFilterComplex({
     label: params.label,
-    logoWidth: cfg.watermarkLogoWidth,
+    logoWidth: params.logoWidth ?? cfg.watermarkLogoWidth,
     fontArg: fontDrawArg(),
   });
 
@@ -202,22 +317,87 @@ export async function encodeWatermarkedExport(params: {
   outPath: string;
   probe: ProbeResult;
 }): Promise<void> {
-  const tmpPath = watermarkedExportTempPath(params.outPath);
   try {
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    if (fs.existsSync(params.outPath)) fs.unlinkSync(params.outPath);
   } catch {
     /* ignore */
   }
 
+  const timing = loadWatermarkTiming();
+  const timeline = buildWatermarkTimeline({
+    durationSec: params.probe.durationSec,
+    timing,
+  });
   const args = buildWatermarkedExportFfmpegArgs({
     ...params,
-    outPath: tmpPath,
+    timing,
+    timeline,
   });
 
   await runFfmpeg(args);
 
-  if (!fs.existsSync(tmpPath)) {
-    throw new EncodeError('ENCODE_FAILED', 'Missing watermarked export temp output', false);
+  if (!fs.existsSync(params.outPath)) {
+    throw new EncodeError('ENCODE_FAILED', 'Missing watermarked export body output', false);
+  }
+}
+
+export async function encodeExportEndCard(params: {
+  watermarkStripPath: string;
+  outPath: string;
+  probe: ProbeResult;
+}): Promise<void> {
+  const chimePath = resolveWatermarkChimePath();
+  try {
+    if (fs.existsSync(params.outPath)) fs.unlinkSync(params.outPath);
+  } catch {
+    /* ignore */
+  }
+
+  const args = buildEndCardFfmpegArgs({
+    watermarkStripPath: params.watermarkStripPath,
+    chimePath,
+    outPath: params.outPath,
+    probe: params.probe,
+  });
+  await runFfmpeg(args);
+
+  if (!fs.existsSync(params.outPath)) {
+    throw new EncodeError('ENCODE_FAILED', 'Missing export end-card output', false);
+  }
+}
+
+export async function concatExportSegments(params: {
+  bodyPath: string;
+  cardPath: string;
+  outPath: string;
+}): Promise<void> {
+  const listPath = `${params.outPath}.concat.txt`;
+  fs.writeFileSync(listPath, buildConcatListContents([params.bodyPath, params.cardPath]));
+  try {
+    if (fs.existsSync(params.outPath)) fs.unlinkSync(params.outPath);
+  } catch {
+    /* ignore */
+  }
+
+  await runFfmpeg([
+    '-y',
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-i',
+    listPath,
+    '-c',
+    'copy',
+    '-movflags',
+    '+faststart',
+    '-f',
+    'mp4',
+    params.outPath,
+  ]);
+
+  if (!fs.existsSync(params.outPath)) {
+    throw new EncodeError('ENCODE_FAILED', 'Missing concat export output', false);
   }
 }
 
@@ -231,4 +411,4 @@ export function finalizeWatermarkedExport(outPath: string): void {
   fs.renameSync(tmpPath, outPath);
 }
 
-export { DEFAULT_WATERMARK_TIMING };
+export { DEFAULT_WATERMARK_TIMING, loadWatermarkTiming };

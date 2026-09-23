@@ -15,8 +15,31 @@ function isStaleRunningJob(job: { status: string; updatedAt: string }): boolean 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
+const cfg = getConfig();
+
+function exitWhenIdle(reason: string): void {
+  console.log(`[encoder] exiting (${reason})`);
+  process.exit(0);
+}
+
 const store = new JobStore();
-const worker = new JobWorker(store);
+const worker = new JobWorker(store, {
+  idleTimeoutMs: cfg.exitWhenIdleSec * 1000,
+  onIdle: () => exitWhenIdle(`idle ${cfg.exitWhenIdleSec}s`),
+});
+
+// Without a handler, node running as PID 1 ignores SIGTERM and the container never stops.
+process.once('SIGTERM', () => {
+  if (worker.isIdle()) {
+    exitWhenIdle('SIGTERM');
+    return;
+  }
+  console.log('[encoder] SIGTERM received, exiting after in-flight jobs finish');
+  setInterval(() => {
+    if (worker.isIdle()) exitWhenIdle('SIGTERM');
+  }, 1000);
+});
+
 const orphans = store.markOrphansFailed();
 if (orphans.length) {
   console.warn(`[encoder] marked ${orphans.length} orphaned in-flight job(s) failed for retry`);
@@ -149,7 +172,8 @@ app.post('/v1/jobs', (req, res) => {
   });
 });
 
-const cfg = getConfig();
 app.listen(cfg.port, () => {
-  console.log(`[encoder] listening on :${cfg.port} (maxConcurrent=${cfg.maxConcurrent})`);
+  console.log(
+    `[encoder] listening on :${cfg.port} (maxConcurrent=${cfg.maxConcurrent}, exitWhenIdleSec=${cfg.exitWhenIdleSec})`,
+  );
 });

@@ -17,6 +17,8 @@ export interface EncoderConfig {
   tmpDir: string;
   maxSourceBytes: number;
   maxDurationSec: number;
+  /** Exit the process after this long with an empty queue. 0 disables (local dev). */
+  exitWhenIdleSec: number;
   ffmpegPath: string;
   ffprobePath: string;
   watermarkLogoPath: string;
@@ -28,6 +30,7 @@ export interface EncoderConfig {
   watermarkHoldSec: number;
   watermarkGapSec: number;
   watermarkPaddingPx: number;
+  watermarkChimePath: string;
 }
 
 function parseKeyRing(raw: string | undefined): HmacKeyRing {
@@ -69,6 +72,7 @@ export function loadConfig(): EncoderConfig {
     tmpDir: process.env.ENCODER_TMP_DIR || '/tmp/encoder',
     maxSourceBytes: intEnv('ENCODER_MAX_SOURCE_BYTES', 524288000),
     maxDurationSec: intEnv('ENCODER_MAX_DURATION_SEC', 180),
+    exitWhenIdleSec: Math.max(0, intEnv('ENCODER_EXIT_WHEN_IDLE_SEC', 0)),
     ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
     ffprobePath: process.env.FFPROBE_PATH || 'ffprobe',
     watermarkLogoPath: process.env.WATERMARK_LOGO_PATH || './assets/logo-watermark.png',
@@ -81,6 +85,7 @@ export function loadConfig(): EncoderConfig {
     watermarkHoldSec: Number(process.env.WATERMARK_HOLD_SEC || 3.9),
     watermarkGapSec: Number(process.env.WATERMARK_GAP_SEC || 0.7),
     watermarkPaddingPx: Number(process.env.WATERMARK_PADDING_PX || 24),
+    watermarkChimePath: process.env.WATERMARK_CHIME_PATH || './assets/dripdrop-chime.wav',
   };
 }
 

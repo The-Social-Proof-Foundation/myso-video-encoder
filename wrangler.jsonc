@@ -15,7 +15,8 @@
     {
       "class_name": "VideoEncoder",
       "image": "./Dockerfile",
-      "max_instances": 20
+      "instance_type": "standard-4",
+      "max_instances": 2
     }
   ],
   "durable_objects": {
@@ -35,6 +36,6 @@
   "vars": {
     "R2_REGION": "auto",
     "ENCODER_TMP_DIR": "/tmp/encoder",
-    "ENCODER_MAX_CONCURRENT": "1"
+    "ENCODER_MAX_CONCURRENT": "2"
   }
 }

@@ -1,4 +1,5 @@
 import { Container, getContainer } from '@cloudflare/containers';
+import { encoderPoolName } from '../src/cf/encoderPool';
 
 export interface Env {
   VIDEO_ENCODER: DurableObjectNamespace;
@@ -28,6 +29,7 @@ export function buildContainerEnv(env: Env): Record<string, string> {
     ENCODER_TMP_DIR: env.ENCODER_TMP_DIR || '/tmp/encoder',
     R2_REGION: env.R2_REGION || 'auto',
     ENCODER_MAX_CONCURRENT: env.ENCODER_MAX_CONCURRENT || '1',
+    ENCODER_EXIT_WHEN_IDLE_SEC: '60',
   };
 
   const optional: (keyof Env)[] = [
@@ -54,9 +56,36 @@ function jobCacheKey(idempotencyKey: string): string {
   return `job:${idempotencyKey}`;
 }
 
+/** Hard ceiling on container uptime after the latest request, independent of sleepAfter. */
+export const HARD_STOP_AFTER_SEC = 15 * 60;
+const HARD_STOP_CALLBACK = 'hardStop';
+
 export class VideoEncoder extends Container {
   defaultPort = 8080;
-  sleepAfter = '2m';
+  /** Fallback only: the container exits on its own once its queue is idle. */
+  sleepAfter = '30m';
+  enableInternet = true;
+  pingEndpoint = '/health';
+
+  /**
+   * Persisted in DO SQLite so it survives a cancelled request or a DO restart.
+   * The insert inside schedule() runs before its first await.
+   */
+  private async armHardStop(): Promise<void> {
+    this.deleteSchedules(HARD_STOP_CALLBACK);
+    await this.schedule(HARD_STOP_AFTER_SEC, HARD_STOP_CALLBACK);
+  }
+
+  async hardStop(): Promise<void> {
+    if (!this.ctx.container?.running) return;
+    console.warn('[encoder] hard stop deadline reached, destroying container');
+    // SIGKILL: node as PID 1 does not act on SIGTERM without a handler.
+    await this.destroy();
+  }
+
+  override onStop(): void {
+    this.deleteSchedules(HARD_STOP_CALLBACK);
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -81,6 +110,8 @@ export class VideoEncoder extends Container {
         }
       }
     }
+
+    await this.armHardStop();
 
     await this.startAndWaitForPorts({
       startOptions: { envVars: buildContainerEnv(this.env as Env) },
@@ -137,7 +168,7 @@ export default {
         return Response.json({ error: 'jobId required' }, { status: 400 });
       }
 
-      const container = getContainer(env.VIDEO_ENCODER, jobId);
+      const container = getContainer(env.VIDEO_ENCODER, encoderPoolName(jobId));
       return container.fetch(
         new Request('http://container/v1/jobs', {
           method: 'POST',

@@ -59,8 +59,12 @@ export function effectiveDims(width: number, height: number, rotation: number): 
   return { width, height };
 }
 
-export async function probeSource(filePath: string): Promise<ProbeResult> {
+export async function probeSource(
+  filePath: string,
+  options?: { maxDurationSec?: number },
+): Promise<ProbeResult> {
   const cfg = getConfig();
+  const maxDurationSec = options?.maxDurationSec ?? cfg.maxDurationSec;
   let stdout: string;
   try {
     const out = await execFileAsync(
@@ -84,8 +88,8 @@ export async function probeSource(filePath: string): Promise<ProbeResult> {
   if (!Number.isFinite(durationSec) || durationSec <= 0) {
     throw new EncodeError('PROBE_FAILED', 'Missing duration', false);
   }
-  if (durationSec > cfg.maxDurationSec) {
-    throw new EncodeError('DURATION_EXCEEDED', `Duration ${durationSec}s > ${cfg.maxDurationSec}s`, false);
+  if (durationSec > maxDurationSec) {
+    throw new EncodeError('DURATION_EXCEEDED', `Duration ${durationSec}s > ${maxDurationSec}s`, false);
   }
 
   const rotation = readRotation(video);

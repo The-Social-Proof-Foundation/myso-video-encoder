@@ -3,7 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { validateExportMp4 } from './exportValidate';
+import {
+  assertExportDuration,
+  assertExportHasAudio,
+  expectedExportDurationSec,
+  validateExportMp4,
+} from './exportValidate';
+import { EXPORT_END_CARD_SEC } from './exportEncode';
+import { EncodeError } from '../types';
 
 describe('validateExportMp4', () => {
   const sourceProbe = {
@@ -43,5 +50,30 @@ describe('validateExportMp4', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('expects source duration plus end card', () => {
+    assert.equal(expectedExportDurationSec(6.2), 6.2 + EXPORT_END_CARD_SEC);
+    assert.doesNotThrow(() => assertExportDuration(8.2, 6.2));
+    assert.throws(
+      () => assertExportDuration(6.2, 6.2),
+      (err: unknown) => {
+        assert.ok(err instanceof EncodeError);
+        assert.match(String(err), /outside expected range/);
+        return true;
+      },
+    );
+  });
+
+  it('requires an audio stream', () => {
+    assert.doesNotThrow(() => assertExportHasAudio(true));
+    assert.throws(
+      () => assertExportHasAudio(false),
+      (err: unknown) => {
+        assert.ok(err instanceof EncodeError);
+        assert.match(String(err), /no audio stream/);
+        return true;
+      },
+    );
   });
 });
