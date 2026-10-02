@@ -15,7 +15,7 @@
     {
       "class_name": "VideoEncoder",
       "image": "./Dockerfile",
-      "instance_type": "standard-4",
+      "instance_type": "standard-2",
       "max_instances": 2
     }
   ],

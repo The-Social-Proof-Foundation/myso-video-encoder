@@ -62,10 +62,24 @@ const HARD_STOP_CALLBACK = 'hardStop';
 
 export class VideoEncoder extends Container {
   defaultPort = 8080;
-  /** Fallback only: the container exits on its own once its queue is idle. */
-  sleepAfter = '30m';
+  /**
+   * HTTP-idle fallback. Must cover a full encode: the 202 returns before ffmpeg,
+   * so a short sleepAfter SIGKILLs in-flight jobs. Matches HARD_STOP_AFTER_SEC.
+   * onActivityExpired uses destroy(), not SIGTERM.
+   */
+  sleepAfter = '15m';
   enableInternet = true;
   pingEndpoint = '/health';
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Rollout-warmed containers never hit fetch(); arm the deadline from DO boot.
+    void this.ctx.blockConcurrencyWhile(async () => {
+      if (this.ctx.container?.running) {
+        await this.armHardStop();
+      }
+    });
+  }
 
   /**
    * Persisted in DO SQLite so it survives a cancelled request or a DO restart.
@@ -77,14 +91,26 @@ export class VideoEncoder extends Container {
   }
 
   async hardStop(): Promise<void> {
-    if (!this.ctx.container?.running) return;
-    console.warn('[encoder] hard stop deadline reached, destroying container');
-    // SIGKILL: node as PID 1 does not act on SIGTERM without a handler.
-    await this.destroy();
+    await this.forceDestroy('hard stop deadline');
+  }
+
+  override async onStart(): Promise<void> {
+    await this.armHardStop();
+  }
+
+  override async onActivityExpired(): Promise<void> {
+    await this.forceDestroy('sleepAfter expired');
   }
 
   override onStop(): void {
     this.deleteSchedules(HARD_STOP_CALLBACK);
+  }
+
+  private async forceDestroy(reason: string): Promise<void> {
+    if (!this.ctx.container?.running) return;
+    console.warn(`[encoder] ${reason}, destroying container`);
+    // SIGKILL — SIGTERM is unreliable for node as PID 1 and the SDK renews sleepAfter after stop().
+    await this.destroy();
   }
 
   async fetch(request: Request): Promise<Response> {

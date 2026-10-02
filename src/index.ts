@@ -16,6 +16,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 
 const cfg = getConfig();
+const exitWhenIdleSec = Math.max(0, Number(process.env.ENCODER_EXIT_WHEN_IDLE_SEC || cfg.exitWhenIdleSec));
 
 function exitWhenIdle(reason: string): void {
   console.log(`[encoder] exiting (${reason})`);
@@ -24,8 +25,8 @@ function exitWhenIdle(reason: string): void {
 
 const store = new JobStore();
 const worker = new JobWorker(store, {
-  idleTimeoutMs: cfg.exitWhenIdleSec * 1000,
-  onIdle: () => exitWhenIdle(`idle ${cfg.exitWhenIdleSec}s`),
+  idleTimeoutMs: exitWhenIdleSec * 1000,
+  onIdle: () => exitWhenIdle(`idle ${exitWhenIdleSec}s`),
 });
 
 // Without a handler, node running as PID 1 ignores SIGTERM and the container never stops.
@@ -174,6 +175,6 @@ app.post('/v1/jobs', (req, res) => {
 
 app.listen(cfg.port, () => {
   console.log(
-    `[encoder] listening on :${cfg.port} (maxConcurrent=${cfg.maxConcurrent}, exitWhenIdleSec=${cfg.exitWhenIdleSec})`,
+    `[encoder] listening on :${cfg.port} (maxConcurrent=${cfg.maxConcurrent}, exitWhenIdleSec=${exitWhenIdleSec})`,
   );
 });
