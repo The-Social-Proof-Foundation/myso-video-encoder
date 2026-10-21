@@ -18,7 +18,6 @@ import {
   encodeWatermarkedExport,
   EXPORT_BODY_FILENAME,
   EXPORT_CARD_FILENAME,
-  EXPORT_END_CARD_LOGO_WIDTH,
   EXPORT_END_CARD_SEC,
   finalizeWatermarkedExport,
   renderWatermarkStrip,
@@ -87,17 +86,10 @@ export async function runExportJob(encoderJobId: string, req: EncoderJobRequest)
     const probe = await probeSource(sourcePath);
     const logoPath = await resolveWatermarkLogoPath(workDir);
     const watermarkStripPath = path.join(workDir, 'watermark.png');
-    const endCardStripPath = path.join(workDir, 'watermark-endcard.png');
     await renderWatermarkStrip({
       outPath: watermarkStripPath,
       label: req.watermark!.label,
       logoPath,
-    });
-    await renderWatermarkStrip({
-      outPath: endCardStripPath,
-      label: req.watermark!.label,
-      logoPath,
-      logoWidth: EXPORT_END_CARD_LOGO_WIDTH,
     });
 
     const outPath = path.join(workDir, WATERMARKED_EXPORT_FILENAME);
@@ -110,7 +102,8 @@ export async function runExportJob(encoderJobId: string, req: EncoderJobRequest)
       probe,
     });
     await encodeExportEndCard({
-      watermarkStripPath: endCardStripPath,
+      sourcePath,
+      label: req.watermark!.label,
       outPath: cardPath,
       probe,
     });

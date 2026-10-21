@@ -8,12 +8,13 @@ import {
   buildWatermarkedExportFilterComplex,
   buildWatermarkedExportFfmpegArgs,
   EXPORT_END_CARD_SEC,
-  resolveWatermarkChimePath,
+  resolveEndCardClipPath,
   WATERMARK_USERNAME_ROW_PX,
   WATERMARKED_EXPORT_FILENAME,
   watermarkedExportTempPath,
   watermarkFontSize,
 } from './exportEncode';
+import { computeEndCardLayout } from './endCardLayout';
 import { EncodeError } from '../types';
 import { resetConfigCache } from '../config';
 
@@ -141,26 +142,85 @@ describe('end card', () => {
     codecName: 'h264',
   };
 
-  it('centers straight-alpha overlay on black', () => {
-    const filter = buildEndCardFilterComplex();
-    assert.match(filter, /color=black|format=gbrp\[base\]/);
-    assert.match(filter, /overlay=x=\(W-w\)\/2:y=\(H-h\)\/2/);
-    assert.match(filter, /alpha=straight/);
+  const layout = computeEndCardLayout(probe.width, probe.height);
+
+  function cardFilter(variant: 'black' | 'white' = 'black', label = '@alice') {
+    return buildEndCardFilterComplex({
+      variant,
+      layout,
+      label,
+      width: probe.width,
+      height: probe.height,
+      fps: probe.fps,
+    });
+  }
+
+  it('lasts 2.5s', () => {
+    assert.equal(EXPORT_END_CARD_SEC, 2.5);
+  });
+
+  it('plays the clip once then holds its last frame', () => {
+    const filter = cardFilter();
+    assert.match(filter, /\[0:v\]fps=30,format=gbrp,tpad=stop_mode=clone:stop_duration=2\.5/);
+  });
+
+  it('stretches the clip corner into a full-frame background', () => {
+    const filter = cardFilter();
+    assert.match(filter, /\[corner\]crop=8:8:0:0,scale=720:1280:flags=neighbor\[base\]/);
+  });
+
+  it('scales and places the clip from the layout', () => {
+    const filter = cardFilter();
+    assert.match(filter, new RegExp(`scale=${layout.clipWidth}:${layout.clipHeight}:flags=lanczos`));
+    assert.match(filter, new RegExp(`overlay=x=${layout.clipX}:y=${layout.clipY}:format=gbrp`));
     assert.match(filter, /format=yuv420p\[outv\]/);
   });
 
-  it('plays chime for 2s with apad', () => {
+  it('draws username then dripdrop.social centered at the bottom', () => {
+    const filter = cardFilter('black', 'brandon:shaw');
+    assert.match(
+      filter,
+      new RegExp(
+        `drawtext=text='brandon\\\\:shaw':fontcolor=0xFFFFFF:fontsize=${layout.usernameFontSize}:` +
+          `x=\\(w-text_w\\)/2:y=${layout.usernameY}`,
+      ),
+    );
+    assert.match(
+      filter,
+      new RegExp(
+        `drawtext=text='dripdrop\\.social':fontcolor=0xA3A3A3:fontsize=${layout.urlFontSize}:` +
+          `x=\\(w-text_w\\)/2:y=${layout.urlY}`,
+      ),
+    );
+  });
+
+  it('uses dark text on the white card', () => {
+    const filter = cardFilter('white');
+    assert.match(filter, /fontcolor=0x111111/);
+    assert.match(filter, /fontcolor=0x737373/);
+  });
+
+  it('pads the clip audio to the card length', () => {
+    assert.match(
+      cardFilter(),
+      /\[0:a:0\]aformat=sample_rates=48000:channel_layouts=stereo,apad\[outa\]/,
+    );
+  });
+
+  it('encodes the clip with mapped video and audio for 2.5s', () => {
     const args = buildEndCardFfmpegArgs({
-      watermarkStripPath: '/in/wm.png',
-      chimePath: '/in/dripdrop-chime.wav',
+      clipPath: '/in/endcard-black.mp4',
+      variant: 'black',
+      label: '@alice',
       outPath: '/out/export-card.mp4',
       probe,
     });
-    assert.ok(args.some((a) => a.includes('color=c=black:s=720x1280')));
-    assert.ok(args.includes('/in/dripdrop-chime.wav'));
-    assert.ok(args.includes('apad'));
-    assert.ok(args.includes(String(EXPORT_END_CARD_SEC)));
-    assert.ok(args.includes('2:a:0'));
+    assert.equal(args[args.indexOf('-i') + 1], '/in/endcard-black.mp4');
+    assert.equal(args.filter((a) => a === '-i').length, 1);
+    assert.equal(args[args.indexOf('-t') + 1], String(EXPORT_END_CARD_SEC));
+    assert.ok(args.includes('[outv]'));
+    assert.ok(args.includes('[outa]'));
+    assert.equal(args[args.length - 1], '/out/export-card.mp4');
   });
 
   it('builds concat list for body then card', () => {
@@ -168,22 +228,22 @@ describe('end card', () => {
     assert.equal(list, "file '/tmp/body.mp4'\nfile '/tmp/card.mp4'\n");
   });
 
-  it('fails closed when chime is missing', () => {
-    const prev = process.env.WATERMARK_CHIME_PATH;
-    process.env.WATERMARK_CHIME_PATH = '/no/such/dripdrop-chime.wav';
+  it('fails closed when the end card clip is missing', () => {
+    const prev = process.env.ENDCARD_WHITE_PATH;
+    process.env.ENDCARD_WHITE_PATH = '/no/such/endcard-white.mp4';
     resetConfigCache();
     try {
       assert.throws(
-        () => resolveWatermarkChimePath(),
+        () => resolveEndCardClipPath('white'),
         (err: unknown) => {
           assert.ok(err instanceof EncodeError);
-          assert.match(String(err), /Watermark chime not found/);
+          assert.match(String(err), /End card clip \(white\) not found/);
           return true;
         },
       );
     } finally {
-      if (prev == null) delete process.env.WATERMARK_CHIME_PATH;
-      else process.env.WATERMARK_CHIME_PATH = prev;
+      if (prev == null) delete process.env.ENDCARD_WHITE_PATH;
+      else process.env.ENDCARD_WHITE_PATH = prev;
       resetConfigCache();
     }
   });

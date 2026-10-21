@@ -12,6 +12,16 @@ import {
   WatermarkSlot,
   WatermarkTiming,
 } from './watermarkAnimation';
+import {
+  chooseEndCardVariant,
+  computeEndCardLayout,
+  END_CARD_URL_COLOR,
+  END_CARD_URL_TEXT,
+  END_CARD_USERNAME_COLOR,
+  EndCardLayout,
+  EndCardVariant,
+  parseAverageYavg,
+} from './endCardLayout';
 import { fpsFilterValue, gopFramesForFps, normalizeFps } from './probe';
 
 const execFileAsync = promisify(execFile);
@@ -21,9 +31,7 @@ export const WATERMARK_USERNAME_ROW_PX = 36;
 
 export const WATERMARKED_EXPORT_FILENAME = 'watermarked-v2.mp4';
 
-export const EXPORT_END_CARD_SEC = 2;
-
-export const EXPORT_END_CARD_LOGO_WIDTH = 360;
+export const EXPORT_END_CARD_SEC = 2.5;
 
 export const EXPORT_BODY_FILENAME = 'export-body.mp4';
 export const EXPORT_CARD_FILENAME = 'export-card.mp4';
@@ -175,49 +183,75 @@ export function buildWatermarkedExportFfmpegArgs(params: {
   ];
 }
 
-export function buildEndCardFilterComplex(): string {
+/**
+ * Animated clip plays once, holds its last frame, with username + site text at the bottom.
+ * The full-frame background is stretched from the clip's own corner so the scaled clip has no
+ * visible edge (a generated color decodes a few levels off the clip's background).
+ */
+export function buildEndCardFilterComplex(params: {
+  variant: EndCardVariant;
+  layout: EndCardLayout;
+  label: string;
+  width: number;
+  height: number;
+  fps: number;
+  durationSec?: number;
+  fontArg?: string;
+}): string {
+  const { layout, variant } = params;
+  const duration = params.durationSec ?? EXPORT_END_CARD_SEC;
+  const fpsVal = fpsFilterValue(normalizeFps(params.fps));
+  const font = params.fontArg ?? '';
+  const label = escapeDrawtext(params.label);
   return (
-    `[0:v]format=gbrp[base];` +
-    `[1:v]format=rgba[wm];` +
-    `[base][wm]overlay=x=(W-w)/2:y=(H-h)/2:format=gbrp:alpha=straight,format=yuv420p[outv]`
+    `[0:v]fps=${fpsVal},format=gbrp,tpad=stop_mode=clone:stop_duration=${duration},split=2[src][corner];` +
+    `[corner]crop=8:8:0:0,scale=${params.width}:${params.height}:flags=neighbor[base];` +
+    `[src]scale=${layout.clipWidth}:${layout.clipHeight}:flags=lanczos+accurate_rnd[clip];` +
+    `[base][clip]overlay=x=${layout.clipX}:y=${layout.clipY}:format=gbrp,` +
+    `drawtext=text='${label}'${font}:fontcolor=${END_CARD_USERNAME_COLOR[variant]}:` +
+    `fontsize=${layout.usernameFontSize}:x=(w-text_w)/2:y=${layout.usernameY},` +
+    `drawtext=text='${END_CARD_URL_TEXT}'${font}:fontcolor=${END_CARD_URL_COLOR[variant]}:` +
+    `fontsize=${layout.urlFontSize}:x=(w-text_w)/2:y=${layout.urlY},` +
+    `format=yuv420p[outv];` +
+    `[0:a:0]aformat=sample_rates=48000:channel_layouts=stereo,apad[outa]`
   );
 }
 
 export function buildEndCardFfmpegArgs(params: {
-  watermarkStripPath: string;
-  chimePath: string;
+  clipPath: string;
+  variant: EndCardVariant;
+  label: string;
   outPath: string;
   probe: ProbeResult;
   durationSec?: number;
+  fontArg?: string;
 }): string[] {
   const duration = params.durationSec ?? EXPORT_END_CARD_SEC;
   const fps = normalizeFps(params.probe.fps);
-  const fpsVal = fpsFilterValue(fps);
   const gop = gopFramesForFps(fps);
   const w = params.probe.width;
   const h = params.probe.height;
 
   return [
     '-y',
-    '-f',
-    'lavfi',
     '-i',
-    `color=c=black:s=${w}x${h}:d=${duration}:r=${fpsVal}`,
-    '-loop',
-    '1',
-    '-i',
-    params.watermarkStripPath,
-    '-i',
-    params.chimePath,
+    params.clipPath,
     '-filter_complex',
-    buildEndCardFilterComplex(),
+    buildEndCardFilterComplex({
+      variant: params.variant,
+      layout: computeEndCardLayout(w, h),
+      label: params.label,
+      width: w,
+      height: h,
+      fps,
+      durationSec: duration,
+      fontArg: params.fontArg,
+    }),
     '-map',
     '[outv]',
     '-map',
-    '2:a:0',
+    '[outa]',
     ...audioEncodeArgs(),
-    '-af',
-    'apad',
     '-c:v',
     'libx264',
     '-profile:v',
@@ -258,16 +292,46 @@ export function watermarkedExportTempPath(outPath: string): string {
   return `${outPath}.tmp`;
 }
 
-export function resolveWatermarkChimePath(): string {
+export function resolveEndCardClipPath(variant: EndCardVariant): string {
   const cfg = getConfig();
-  if (!cfg.watermarkChimePath || !fs.existsSync(cfg.watermarkChimePath)) {
+  const clipPath = variant === 'black' ? cfg.endCardBlackPath : cfg.endCardWhitePath;
+  if (!clipPath || !fs.existsSync(clipPath)) {
     throw new EncodeError(
       'VALIDATION_FAILED',
-      `Watermark chime not found at ${cfg.watermarkChimePath || '(empty)'}`,
+      `End card clip (${variant}) not found at ${clipPath || '(empty)'}`,
       false,
     );
   }
-  return cfg.watermarkChimePath;
+  return clipPath;
+}
+
+/** Average luma of the source's last ~0.25s (8-bit scale); null when it cannot be sampled. */
+export async function measureEndingLuma(sourcePath: string): Promise<number | null> {
+  const cfg = getConfig();
+  try {
+    const { stdout } = await execFileAsync(
+      cfg.ffmpegPath,
+      [
+        '-v',
+        'error',
+        '-sseof',
+        '-0.25',
+        '-i',
+        sourcePath,
+        '-an',
+        '-vf',
+        'format=yuv420p,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=-',
+        '-f',
+        'null',
+        '-',
+      ],
+      { maxBuffer: 10 * 1024 * 1024 },
+    );
+    return parseAverageYavg(stdout);
+  } catch (err) {
+    console.warn('[encoder] end card luma sample failed', err);
+    return null;
+  }
 }
 
 /** Render transparent PNG strip: brand logo + creator label stacked vertically. */
@@ -342,11 +406,13 @@ export async function encodeWatermarkedExport(params: {
 }
 
 export async function encodeExportEndCard(params: {
-  watermarkStripPath: string;
+  sourcePath: string;
+  label: string;
   outPath: string;
   probe: ProbeResult;
 }): Promise<void> {
-  const chimePath = resolveWatermarkChimePath();
+  const variant = chooseEndCardVariant(await measureEndingLuma(params.sourcePath));
+  const clipPath = resolveEndCardClipPath(variant);
   try {
     if (fs.existsSync(params.outPath)) fs.unlinkSync(params.outPath);
   } catch {
@@ -354,10 +420,12 @@ export async function encodeExportEndCard(params: {
   }
 
   const args = buildEndCardFfmpegArgs({
-    watermarkStripPath: params.watermarkStripPath,
-    chimePath,
+    clipPath,
+    variant,
+    label: params.label,
     outPath: params.outPath,
     probe: params.probe,
+    fontArg: fontDrawArg(),
   });
   await runFfmpeg(args);
 

@@ -30,7 +30,8 @@ export interface EncoderConfig {
   watermarkHoldSec: number;
   watermarkGapSec: number;
   watermarkPaddingPx: number;
-  watermarkChimePath: string;
+  endCardBlackPath: string;
+  endCardWhitePath: string;
 }
 
 function parseKeyRing(raw: string | undefined): HmacKeyRing {
@@ -85,7 +86,8 @@ export function loadConfig(): EncoderConfig {
     watermarkHoldSec: Number(process.env.WATERMARK_HOLD_SEC || 3.9),
     watermarkGapSec: Number(process.env.WATERMARK_GAP_SEC || 0.7),
     watermarkPaddingPx: Number(process.env.WATERMARK_PADDING_PX || 24),
-    watermarkChimePath: process.env.WATERMARK_CHIME_PATH || './assets/dripdrop-chime.wav',
+    endCardBlackPath: process.env.ENDCARD_BLACK_PATH || './assets/endcard-black.mp4',
+    endCardWhitePath: process.env.ENDCARD_WHITE_PATH || './assets/endcard-white.mp4',
   };
 }
 
