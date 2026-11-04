@@ -176,7 +176,7 @@ describe('end card', () => {
     assert.match(filter, /format=yuv420p\[outv\]/);
   });
 
-  it('draws username then dripdrop.social centered at the bottom', () => {
+  it('draws the username then the wordmark image centered at the bottom', () => {
     const filter = cardFilter('black', 'brandon:shaw');
     assert.match(
       filter,
@@ -185,19 +185,24 @@ describe('end card', () => {
           `x=\\(w-text_w\\)/2:y=${layout.usernameY}`,
       ),
     );
+    assert.doesNotMatch(filter, /dripdrop\.social/);
     assert.match(
       filter,
       new RegExp(
-        `drawtext=text='dripdrop\\.social':fontcolor=0xA3A3A3:fontsize=${layout.urlFontSize}:` +
-          `x=\\(w-text_w\\)/2:y=${layout.urlY}`,
+        `\\[1:v\\]format=rgba,scale=${layout.wordmarkWidth}:${layout.wordmarkHeight}:flags=lanczos,` +
+          `lutrgb=r=255:g=255:b=255\\[mark\\]`,
       ),
+    );
+    assert.match(
+      filter,
+      new RegExp(`\\[card\\]\\[mark\\]overlay=x=\\(W-w\\)/2:y=${layout.wordmarkY}:format=gbrp`),
     );
   });
 
-  it('uses dark text on the white card', () => {
+  it('uses dark text and a dark wordmark on the white card', () => {
     const filter = cardFilter('white');
     assert.match(filter, /fontcolor=0x111111/);
-    assert.match(filter, /fontcolor=0x737373/);
+    assert.match(filter, /lutrgb=r=17:g=17:b=17\[mark\]/);
   });
 
   it('pads the clip audio to the card length', () => {
@@ -210,13 +215,15 @@ describe('end card', () => {
   it('encodes the clip with mapped video and audio for 2.5s', () => {
     const args = buildEndCardFfmpegArgs({
       clipPath: '/in/endcard-black.mp4',
+      wordmarkPath: '/in/endcard-wordmark.png',
       variant: 'black',
       label: '@alice',
       outPath: '/out/export-card.mp4',
       probe,
     });
     assert.equal(args[args.indexOf('-i') + 1], '/in/endcard-black.mp4');
-    assert.equal(args.filter((a) => a === '-i').length, 1);
+    assert.equal(args[args.lastIndexOf('-i') + 1], '/in/endcard-wordmark.png');
+    assert.equal(args.filter((a) => a === '-i').length, 2);
     assert.equal(args[args.indexOf('-t') + 1], String(EXPORT_END_CARD_SEC));
     assert.ok(args.includes('[outv]'));
     assert.ok(args.includes('[outa]'));

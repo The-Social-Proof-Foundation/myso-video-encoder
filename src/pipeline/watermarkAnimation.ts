@@ -61,27 +61,98 @@ export function pickRandomHold(rng: () => number = Math.random): number {
   return Number((HOLD_MIN_SEC + rng() * (HOLD_MAX_SEC - HOLD_MIN_SEC)).toFixed(3));
 }
 
-/** Enough slots to cover duration (worst-case hold = HOLD_MIN_SEC). */
+/** Videos shorter than this get proportionally shorter fade + gap transitions. */
+export const FULL_TRANSITION_MIN_SEC = 8;
+/** Floor on the transition shrink so the fade never becomes a hard cut. */
+export const MIN_TRANSITION_SCALE = 0.25;
+/** The position after the first move stays on screen at least this long (or 40% of the video). */
+export const MIN_VISIBLE_AFTER_MOVE_SEC = 1;
+const MIN_HOLD_SEC = 0.05;
+
+export type WatermarkPlan = {
+  /** Timing to render with; fade/gap are shortened for short videos. */
+  timing: WatermarkTiming;
+  slots: WatermarkSlot[];
+};
+
+function round3(n: number): number {
+  return Number(n.toFixed(3));
+}
+
+/**
+ * Positions + holds for one export, guaranteed to move at least once whatever the length.
+ * Long videos keep the 3–5s random holds. Short videos land the first move between ~35% and
+ * 60% of the way in, so the second position stays visible for at least 40% of the video.
+ * Consecutive positions always differ, a position never appears just to flash at the end, and
+ * the last position holds at full opacity through the final frame.
+ */
+export function buildWatermarkPlan(params: {
+  durationSec: number;
+  timing?: WatermarkTiming;
+  rng?: () => number;
+}): WatermarkPlan {
+  const base = params.timing ?? DEFAULT_WATERMARK_TIMING;
+  const rng = params.rng ?? Math.random;
+  const duration =
+    Number.isFinite(params.durationSec) && params.durationSec > 0
+      ? params.durationSec
+      : 2 * (HOLD_MAX_SEC + base.fadeSec + base.gapSec);
+
+  const transitionScale = Math.min(
+    1,
+    Math.max(MIN_TRANSITION_SCALE, duration / FULL_TRANSITION_MIN_SEC),
+  );
+  const timing: WatermarkTiming = {
+    ...base,
+    fadeSec: round3(base.fadeSec * transitionScale),
+    gapSec: round3(base.gapSec * transitionScale),
+  };
+  const transition = timing.fadeSec + timing.gapSec;
+
+  const visibleAfterMove = Math.max(
+    Math.min(MIN_VISIBLE_AFTER_MOVE_SEC, duration / 2),
+    duration * 0.4,
+  );
+  const latestFirstMove = duration - visibleAfterMove;
+  const holdMax = Math.max(MIN_HOLD_SEC, Math.min(HOLD_MAX_SEC, latestFirstMove - transition));
+  const holdMin = Math.min(HOLD_MIN_SEC, holdMax * 0.6);
+  const pickHold = () => round3(holdMin + rng() * (holdMax - holdMin));
+  // Below this much remaining time, extend the current position instead of flashing a new one.
+  const minTail = Math.min(MIN_VISIBLE_AFTER_MOVE_SEC, duration / 4);
+
+  const slots: WatermarkSlot[] = [];
+  let covered = 0;
+  while (covered < duration) {
+    const prev = slots[slots.length - 1];
+    if (prev && slots.length >= 2 && duration - covered < minTail) {
+      prev.holdSec = round3(prev.holdSec + (duration - covered) + transition);
+      break;
+    }
+    const pool = prev ? ALL_ANCHORS.filter((a) => a !== prev.anchor) : START_ANCHORS;
+    slots.push({ anchor: pickFrom(pool, rng), holdSec: pickHold() });
+    covered += slots[slots.length - 1].holdSec + transition;
+  }
+  if (slots.length === 1) {
+    const prev = slots[0];
+    slots.push({
+      anchor: pickFrom(ALL_ANCHORS.filter((a) => a !== prev.anchor), rng),
+      holdSec: pickHold(),
+    });
+  }
+  // The last position stays fully visible through the final frame (no fade-out before the end).
+  const last = slots[slots.length - 1];
+  const lastStart = slots.slice(0, -1).reduce((t, s) => t + s.holdSec + transition, 0);
+  last.holdSec = round3(Math.max(last.holdSec, duration - lastStart));
+  return { timing, slots };
+}
+
+/** Slots for the given timing (see buildWatermarkPlan; ignores its fitted timing). */
 export function buildWatermarkTimeline(params: {
   durationSec: number;
   timing?: WatermarkTiming;
   rng?: () => number;
 }): WatermarkSlot[] {
-  const timing = params.timing ?? DEFAULT_WATERMARK_TIMING;
-  const rng = params.rng ?? Math.random;
-  const slots: WatermarkSlot[] = [];
-  let covered = 0;
-  const target = Math.max(params.durationSec, timing.fadeSec + timing.gapSec + HOLD_MIN_SEC);
-  while (covered < target) {
-    const isFirst = slots.length === 0;
-    slots.push({
-      anchor: pickFrom(isFirst ? START_ANCHORS : ALL_ANCHORS, rng),
-      holdSec: pickRandomHold(rng),
-    });
-    const last = slots[slots.length - 1];
-    covered += last.holdSec + timing.fadeSec + timing.gapSec;
-  }
-  return slots;
+  return buildWatermarkPlan(params).slots;
 }
 
 export function slotDurationSec(slot: WatermarkSlot, timing: WatermarkTiming): number {

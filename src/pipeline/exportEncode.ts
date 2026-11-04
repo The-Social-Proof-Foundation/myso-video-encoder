@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
   buildOverlayExpressions,
-  buildWatermarkTimeline,
+  buildWatermarkPlan,
   DEFAULT_WATERMARK_TIMING,
   escapeDrawtext,
   escapeFilterExpr,
@@ -15,9 +15,8 @@ import {
 import {
   chooseEndCardVariant,
   computeEndCardLayout,
-  END_CARD_URL_COLOR,
-  END_CARD_URL_TEXT,
   END_CARD_USERNAME_COLOR,
+  END_CARD_WORDMARK_COLOR,
   EndCardLayout,
   EndCardVariant,
   parseAverageYavg,
@@ -122,12 +121,12 @@ export function buildWatermarkedExportFfmpegArgs(params: {
   timing?: WatermarkTiming;
   timeline?: WatermarkSlot[];
 }): string[] {
-  const timing = params.timing ?? DEFAULT_WATERMARK_TIMING;
+  const plan = params.timeline
+    ? { timing: params.timing ?? DEFAULT_WATERMARK_TIMING, slots: params.timeline }
+    : buildWatermarkPlan({ durationSec: params.probe.durationSec, timing: params.timing });
+  const { timing, slots: timeline } = plan;
   const fps = normalizeFps(params.probe.fps);
   const gop = gopFramesForFps(fps);
-  const timeline =
-    params.timeline ??
-    buildWatermarkTimeline({ durationSec: params.probe.durationSec, timing });
   const filter = buildWatermarkedExportFilterComplex(timing, fps, timeline);
   const duration = String(params.probe.durationSec);
 
@@ -184,7 +183,8 @@ export function buildWatermarkedExportFfmpegArgs(params: {
 }
 
 /**
- * Animated clip plays once, holds its last frame, with username + site text at the bottom.
+ * Animated clip (input 0) plays once, holds its last frame, with the username and the dripdrop
+ * wordmark image (input 1, white with alpha, tinted per variant) at the bottom.
  * The full-frame background is stretched from the clip's own corner so the scaled clip has no
  * visible edge (a generated color decodes a few levels off the clip's background).
  */
@@ -203,15 +203,18 @@ export function buildEndCardFilterComplex(params: {
   const fpsVal = fpsFilterValue(normalizeFps(params.fps));
   const font = params.fontArg ?? '';
   const label = escapeDrawtext(params.label);
+  const tint = parseInt(END_CARD_WORDMARK_COLOR[variant].slice(2), 16);
+  const [r, g, b] = [(tint >> 16) & 255, (tint >> 8) & 255, tint & 255];
   return (
     `[0:v]fps=${fpsVal},format=gbrp,tpad=stop_mode=clone:stop_duration=${duration},split=2[src][corner];` +
     `[corner]crop=8:8:0:0,scale=${params.width}:${params.height}:flags=neighbor[base];` +
     `[src]scale=${layout.clipWidth}:${layout.clipHeight}:flags=lanczos+accurate_rnd[clip];` +
     `[base][clip]overlay=x=${layout.clipX}:y=${layout.clipY}:format=gbrp,` +
     `drawtext=text='${label}'${font}:fontcolor=${END_CARD_USERNAME_COLOR[variant]}:` +
-    `fontsize=${layout.usernameFontSize}:x=(w-text_w)/2:y=${layout.usernameY},` +
-    `drawtext=text='${END_CARD_URL_TEXT}'${font}:fontcolor=${END_CARD_URL_COLOR[variant]}:` +
-    `fontsize=${layout.urlFontSize}:x=(w-text_w)/2:y=${layout.urlY},` +
+    `fontsize=${layout.usernameFontSize}:x=(w-text_w)/2:y=${layout.usernameY}[card];` +
+    `[1:v]format=rgba,scale=${layout.wordmarkWidth}:${layout.wordmarkHeight}:flags=lanczos,` +
+    `lutrgb=r=${r}:g=${g}:b=${b}[mark];` +
+    `[card][mark]overlay=x=(W-w)/2:y=${layout.wordmarkY}:format=gbrp,` +
     `format=yuv420p[outv];` +
     `[0:a:0]aformat=sample_rates=48000:channel_layouts=stereo,apad[outa]`
   );
@@ -219,6 +222,7 @@ export function buildEndCardFilterComplex(params: {
 
 export function buildEndCardFfmpegArgs(params: {
   clipPath: string;
+  wordmarkPath: string;
   variant: EndCardVariant;
   label: string;
   outPath: string;
@@ -236,6 +240,8 @@ export function buildEndCardFfmpegArgs(params: {
     '-y',
     '-i',
     params.clipPath,
+    '-i',
+    params.wordmarkPath,
     '-filter_complex',
     buildEndCardFilterComplex({
       variant: params.variant,
@@ -303,6 +309,19 @@ export function resolveEndCardClipPath(variant: EndCardVariant): string {
     );
   }
   return clipPath;
+}
+
+export function resolveEndCardWordmarkPath(): string {
+  const cfg = getConfig();
+  const wordmarkPath = cfg.endCardWordmarkPath;
+  if (!wordmarkPath || !fs.existsSync(wordmarkPath)) {
+    throw new EncodeError(
+      'VALIDATION_FAILED',
+      `End card wordmark not found at ${wordmarkPath || '(empty)'}`,
+      false,
+    );
+  }
+  return wordmarkPath;
 }
 
 /** Average luma of the source's last ~0.25s (8-bit scale); null when it cannot be sampled. */
@@ -387,15 +406,14 @@ export async function encodeWatermarkedExport(params: {
     /* ignore */
   }
 
-  const timing = loadWatermarkTiming();
-  const timeline = buildWatermarkTimeline({
+  const plan = buildWatermarkPlan({
     durationSec: params.probe.durationSec,
-    timing,
+    timing: loadWatermarkTiming(),
   });
   const args = buildWatermarkedExportFfmpegArgs({
     ...params,
-    timing,
-    timeline,
+    timing: plan.timing,
+    timeline: plan.slots,
   });
 
   await runFfmpeg(args);
@@ -413,6 +431,7 @@ export async function encodeExportEndCard(params: {
 }): Promise<void> {
   const variant = chooseEndCardVariant(await measureEndingLuma(params.sourcePath));
   const clipPath = resolveEndCardClipPath(variant);
+  const wordmarkPath = resolveEndCardWordmarkPath();
   try {
     if (fs.existsSync(params.outPath)) fs.unlinkSync(params.outPath);
   } catch {
@@ -421,6 +440,7 @@ export async function encodeExportEndCard(params: {
 
   const args = buildEndCardFfmpegArgs({
     clipPath,
+    wordmarkPath,
     variant,
     label: params.label,
     outPath: params.outPath,

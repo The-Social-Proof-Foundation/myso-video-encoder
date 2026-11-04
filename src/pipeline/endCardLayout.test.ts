@@ -50,8 +50,13 @@ describe('computeEndCardLayout', () => {
 
       it('keeps the logo and its bounce above the username', () => {
         assert.ok(box.motionBottom < box.layout.usernameY);
-        assert.ok(box.layout.usernameY < box.layout.urlY);
-        assert.ok(box.layout.urlY + box.layout.urlFontSize <= h);
+        assert.ok(box.layout.usernameY + box.layout.usernameFontSize < box.layout.wordmarkY);
+        assert.ok(box.layout.wordmarkY + box.layout.wordmarkHeight <= h);
+      });
+
+      it('keeps the settled logo at most a quarter of the frame width and height', () => {
+        assert.ok(box.right - box.left <= w * 0.25 + 2, `logo width ${box.right - box.left} of ${w}`);
+        assert.ok(box.bottom - box.top <= h * 0.27, `logo height ${box.bottom - box.top} of ${h}`);
       });
 
       it('scales the clip to even dimensions', () => {
@@ -61,9 +66,14 @@ describe('computeEndCardLayout', () => {
     });
   }
 
-  it('uses a smaller url line than the username line', () => {
+  it('keeps the wordmark small and tucked under the username', () => {
     const l = computeEndCardLayout(1080, 1920);
-    assert.ok(l.urlFontSize < l.usernameFontSize);
+    assert.ok(l.wordmarkHeight < l.usernameFontSize);
+    assert.ok(l.wordmarkWidth <= 1080 * 0.15, `wordmark width ${l.wordmarkWidth}`);
+    assert.equal(l.wordmarkWidth % 2, 0);
+    assert.equal(l.wordmarkHeight % 2, 0);
+    const gap = l.wordmarkY - (l.usernameY + l.usernameFontSize);
+    assert.ok(gap > 0 && gap <= l.usernameFontSize * 0.3, `gap ${gap}`);
   });
 });
 

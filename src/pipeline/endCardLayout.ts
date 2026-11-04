@@ -1,5 +1,6 @@
 /**
- * Export end card: animated logo clip placed top-middle, creator + site text at the bottom.
+ * Export end card: animated logo clip placed top-middle, creator username + dripdrop wordmark
+ * at the bottom.
  * Pure layout and variant selection so the ffmpeg graph stays testable.
  */
 import { even } from './ladder';
@@ -12,12 +13,14 @@ export const END_CARD_USERNAME_COLOR: Record<EndCardVariant, string> = {
   white: '0x111111',
 };
 
-export const END_CARD_URL_COLOR: Record<EndCardVariant, string> = {
-  black: '0xA3A3A3',
-  white: '0x737373',
+/** Wordmark tint per card (the bundled wordmark image is white with alpha). */
+export const END_CARD_WORDMARK_COLOR: Record<EndCardVariant, string> = {
+  black: '0xFFFFFF',
+  white: '0x111111',
 };
 
-export const END_CARD_URL_TEXT = 'dripdrop.social';
+/** Aspect ratio (width / height) of the bundled wordmark image. */
+export const END_CARD_WORDMARK_ASPECT = 640 / 152;
 
 /**
  * Geometry of the bundled 698×1440 clips (both variants share it).
@@ -38,6 +41,11 @@ export const END_CARD_CLIP = {
 export const END_CARD_LOGO_CENTER_Y = 0.3;
 /** Settled-logo width cap as a fraction of frame width. */
 export const END_CARD_LOGO_MAX_WIDTH = 0.5;
+/**
+ * Final size multiplier applied after the fit constraints above. The fitted logo read too
+ * large on the card, so it is rendered at half the size the constraints would allow.
+ */
+export const END_CARD_LOGO_SCALE = 0.5;
 
 export const END_CARD_BRIGHT_YAVG = 128;
 
@@ -47,19 +55,21 @@ export interface EndCardLayout {
   clipX: number;
   clipY: number;
   usernameFontSize: number;
-  urlFontSize: number;
   usernameY: number;
-  urlY: number;
+  wordmarkWidth: number;
+  wordmarkHeight: number;
+  wordmarkY: number;
 }
 
 export function computeEndCardLayout(width: number, height: number): EndCardLayout {
   const base = Math.min(width, height);
   const usernameFontSize = Math.max(12, Math.round(base * 0.044));
-  const urlFontSize = Math.max(10, Math.round(base * 0.032));
+  const wordmarkHeight = even(Math.max(8, base * 0.03));
+  const wordmarkWidth = even(wordmarkHeight * END_CARD_WORDMARK_ASPECT);
   const bottomPad = Math.round(height * 0.05);
-  const lineGap = Math.round(urlFontSize * 0.5);
-  const urlY = height - bottomPad - urlFontSize;
-  const usernameY = urlY - lineGap - usernameFontSize;
+  const lineGap = Math.round(usernameFontSize * 0.25);
+  const wordmarkY = height - bottomPad - wordmarkHeight;
+  const usernameY = wordmarkY - lineGap - usernameFontSize;
 
   const topPad = Math.round(height * 0.04);
   const textGap = Math.round(height * 0.03);
@@ -70,11 +80,12 @@ export function computeEndCardLayout(width: number, height: number): EndCardLayo
   const markCx = (c.markLeft + c.markRight) / 2;
   const markCy = (c.markTop + c.markBottom) / 2;
 
-  const scale = Math.min(
+  const fitScale = Math.min(
     (width * END_CARD_LOGO_MAX_WIDTH) / markW,
     (centerY - topPad) / (markCy - c.markTop),
     (usernameY - textGap - centerY) / (c.motionBottom - markCy),
   );
+  const scale = fitScale * END_CARD_LOGO_SCALE;
 
   const clipWidth = even(c.width * scale);
   const clipHeight = even(c.height * scale);
@@ -87,9 +98,10 @@ export function computeEndCardLayout(width: number, height: number): EndCardLayo
     clipX: Math.round(width / 2 - markCx * sx),
     clipY: Math.round(centerY - markCy * sy),
     usernameFontSize,
-    urlFontSize,
     usernameY,
-    urlY,
+    wordmarkWidth,
+    wordmarkHeight,
+    wordmarkY,
   };
 }
 

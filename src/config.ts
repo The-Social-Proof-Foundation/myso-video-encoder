@@ -32,6 +32,7 @@ export interface EncoderConfig {
   watermarkPaddingPx: number;
   endCardBlackPath: string;
   endCardWhitePath: string;
+  endCardWordmarkPath: string;
 }
 
 function parseKeyRing(raw: string | undefined): HmacKeyRing {
@@ -88,6 +89,7 @@ export function loadConfig(): EncoderConfig {
     watermarkPaddingPx: Number(process.env.WATERMARK_PADDING_PX || 24),
     endCardBlackPath: process.env.ENDCARD_BLACK_PATH || './assets/endcard-black.mp4',
     endCardWhitePath: process.env.ENDCARD_WHITE_PATH || './assets/endcard-white.mp4',
+    endCardWordmarkPath: process.env.ENDCARD_WORDMARK_PATH || './assets/endcard-wordmark.png',
   };
 }
 
