@@ -69,7 +69,7 @@ describe('computeEndCardLayout', () => {
     const l = computeEndCardLayout(1080, 1920);
     assert.ok(l.wordmarkHeight > l.usernameFontSize, `wordmark h ${l.wordmarkHeight}`);
     assert.ok(l.wordmarkWidth >= 1080 * 0.2, `wordmark width ${l.wordmarkWidth}`);
-    assert.ok(l.wordmarkWidth <= 1080 * 0.3, `wordmark width ${l.wordmarkWidth}`);
+    assert.ok(l.wordmarkWidth <= 1080 * 0.36, `wordmark width ${l.wordmarkWidth}`);
     assert.equal(l.wordmarkWidth % 2, 0);
     assert.equal(l.wordmarkHeight % 2, 0);
     const gap = l.wordmarkY - (l.usernameY + l.usernameFontSize);

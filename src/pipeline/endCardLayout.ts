@@ -48,7 +48,7 @@ export const END_CARD_LOGO_MAX_WIDTH = 0.5;
  */
 export const END_CARD_LOGO_SCALE = 0.36;
 /** Wordmark height as a fraction of min(width, height). */
-export const END_CARD_WORDMARK_HEIGHT = 0.058;
+export const END_CARD_WORDMARK_HEIGHT = 0.072;
 /** Username may span at most this fraction of frame width; longer names get a smaller font. */
 export const END_CARD_USERNAME_MAX_WIDTH = 0.88;
 
