@@ -214,13 +214,15 @@ export function buildTimelineAlphaExpression(
 ): string {
   const fade = timing.fadeSec;
   let cursor = 0;
-  const ranges = slots.map((slot) => {
+  const ranges = slots.map((slot, i) => {
     const start = cursor;
     const holdEnd = start + slot.holdSec;
+    // Every position after the first eases in (the first is on screen from frame one).
+    const fadeIn = i === 0 ? 0 : Math.min(fade, slot.holdSec / 2);
     const fadeEnd = holdEnd + fade;
     const slotEnd = fadeEnd + timing.gapSec;
     cursor = slotEnd;
-    return { holdEnd, fadeEnd, slotEnd };
+    return { start, fadeIn, holdEnd, fadeEnd, slotEnd };
   });
 
   if (ranges.length === 0) return '0';
@@ -228,13 +230,25 @@ export function buildTimelineAlphaExpression(
   let expr = '0';
   for (let i = ranges.length - 1; i >= 0; i -= 1) {
     const r = ranges[i];
-    const fadePart = `1-(${timeVar}-${fmtExprNum(r.holdEnd)})/${fmtExprNum(fade)}`;
-    const inSlot =
+    const fadeOutPart = `1-${easeExpr(timeVar, r.holdEnd, fade)}`;
+    let inSlot =
       `if(lt(${timeVar},${fmtExprNum(r.holdEnd)}),1,` +
-      `if(lt(${timeVar},${fmtExprNum(r.fadeEnd)}),${fadePart},0))`;
+      `if(lt(${timeVar},${fmtExprNum(r.fadeEnd)}),${fadeOutPart},0))`;
+    if (r.fadeIn > 0) {
+      const inEnd = r.start + r.fadeIn;
+      inSlot =
+        `if(lt(${timeVar},${fmtExprNum(inEnd)}),${easeExpr(timeVar, r.start, r.fadeIn)},` +
+        `${inSlot})`;
+    }
     expr = `if(lt(${timeVar},${fmtExprNum(r.slotEnd)}),${inSlot},${expr})`;
   }
   return expr;
+}
+
+/** Smoothstep 0→1 over [from, from+dur]: u²(3−2u). Softer than a linear ramp at both ends. */
+function easeExpr(timeVar: string, from: number, dur: number): string {
+  const u = `(${timeVar}-${fmtExprNum(from)})/${fmtExprNum(dur)}`;
+  return `(${u})*(${u})*(3-2*(${u}))`;
 }
 
 function buildTimelineAxisExpression(

@@ -132,6 +132,10 @@ describe('watermarkAnimation', () => {
     assert.match(expr, /if\(lt\(t,9\.1\),1,/);
     const ends = slotEnds(slots, DEFAULT_WATERMARK_TIMING);
     assert.equal(ends[0], 4.1);
+    // Second position eases in from 4.1 to 4.5 instead of popping in.
+    assert.match(expr, /if\(lt\(t,4\.5\),\(\(t-4\.1\)\/0\.4\)\*/);
+    // First position is on screen from frame one (no fade-in).
+    assert.doesNotMatch(expr, /\(t-0\)\/0\.4/);
     assert.equal(Number(ends[1].toFixed(3)), 10.2);
   });
 

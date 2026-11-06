@@ -32,10 +32,9 @@ describe('computeEndCardLayout', () => {
     describe(`${w}x${h}`, () => {
       const box = settledMarkBox(w, h);
 
-      it('puts the settled logo center in the upper third', () => {
+      it('settles the logo in the vertical middle of the frame', () => {
         const cy = (box.top + box.bottom) / 2;
-        assert.ok(cy < h / 3, `center ${cy} not in upper third of ${h}`);
-        assert.ok(cy > h * 0.2, `center ${cy} too close to top of ${h}`);
+        assert.ok(Math.abs(cy - h / 2) <= 2, `center y ${cy} vs ${h / 2}`);
       });
 
       it('centers the settled logo horizontally', () => {
@@ -66,14 +65,28 @@ describe('computeEndCardLayout', () => {
     });
   }
 
-  it('keeps the wordmark small and tucked under the username', () => {
+  it('sizes the wordmark prominently and tucks it under the username', () => {
     const l = computeEndCardLayout(1080, 1920);
-    assert.ok(l.wordmarkHeight < l.usernameFontSize);
-    assert.ok(l.wordmarkWidth <= 1080 * 0.15, `wordmark width ${l.wordmarkWidth}`);
+    assert.ok(l.wordmarkHeight > l.usernameFontSize, `wordmark h ${l.wordmarkHeight}`);
+    assert.ok(l.wordmarkWidth >= 1080 * 0.2, `wordmark width ${l.wordmarkWidth}`);
+    assert.ok(l.wordmarkWidth <= 1080 * 0.3, `wordmark width ${l.wordmarkWidth}`);
     assert.equal(l.wordmarkWidth % 2, 0);
     assert.equal(l.wordmarkHeight % 2, 0);
     const gap = l.wordmarkY - (l.usernameY + l.usernameFontSize);
-    assert.ok(gap > 0 && gap <= l.usernameFontSize * 0.3, `gap ${gap}`);
+    assert.ok(gap > 0 && gap <= l.usernameFontSize * 0.4, `gap ${gap}`);
+  });
+
+  it('keeps the settled logo smaller than a fifth of the frame width', () => {
+    const box = settledMarkBox(1080, 1920);
+    assert.ok(box.right - box.left <= 1080 * 0.2, `logo width ${box.right - box.left}`);
+  });
+
+  it('shrinks the username font for long names so it fits the frame', () => {
+    const short = computeEndCardLayout(1080, 1920, '@bob');
+    const long = computeEndCardLayout(1080, 1920, '@' + 'w'.repeat(40));
+    assert.equal(short.usernameFontSize, computeEndCardLayout(1080, 1920).usernameFontSize);
+    assert.ok(long.usernameFontSize < short.usernameFontSize);
+    assert.ok(long.usernameFontSize * 41 <= 1080, `font ${long.usernameFontSize}`);
   });
 });
 

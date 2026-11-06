@@ -81,7 +81,7 @@ export function loadConfig(): EncoderConfig {
     watermarkLogoUrl: process.env.WATERMARK_LOGO_URL || '',
     watermarkLogoWidth: intEnv('WATERMARK_LOGO_WIDTH', 220),
     watermarkFontPath:
-      process.env.WATERMARK_FONT_PATH || '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+      process.env.WATERMARK_FONT_PATH || './assets/fonts/Manrope-Medium.ttf',
     watermarkCycleSec: Number(process.env.WATERMARK_CYCLE_SEC || 5),
     watermarkFadeSec: Number(process.env.WATERMARK_FADE_SEC || 0.4),
     watermarkHoldSec: Number(process.env.WATERMARK_HOLD_SEC || 3.9),

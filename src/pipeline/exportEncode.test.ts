@@ -13,7 +13,10 @@ import {
   WATERMARKED_EXPORT_FILENAME,
   watermarkedExportTempPath,
   watermarkFontSize,
+  watermarkStripLayout,
+  WATERMARK_MAX_STRIP_RATIO,
 } from './exportEncode';
+import { estimateTextWidthPx } from './textMetrics';
 import { computeEndCardLayout } from './endCardLayout';
 import { EncodeError } from '../types';
 import { resetConfigCache } from '../config';
@@ -25,7 +28,7 @@ describe('buildStackedWatermarkFilterComplex', () => {
       logoWidth: 220,
     });
     assert.match(filter, /format=rgba,scale=220:-1:flags=lanczos/);
-    assert.match(filter, /pad=w=iw:h=ih\+/);
+    assert.match(filter, /pad=w=220:h=ih\+\d+:x=\(ow-iw\)\/2/);
     assert.match(filter, /color=0x00000000/);
     assert.match(filter, /box=0/);
     assert.doesNotMatch(filter, /color=c=black@0\.0/);
@@ -48,6 +51,25 @@ describe('buildStackedWatermarkFilterComplex', () => {
       logoWidth: 160,
     });
     assert.match(filter, /drawtext=text='0x972237cc\.\.\.a65e0f00'/);
+  });
+
+  it('widens the strip around the centered logo so long usernames are not cut off', () => {
+    const label = '@random_gen_idear';
+    const { stripWidth, fontSize } = watermarkStripLayout(label, 220);
+    assert.equal(fontSize, watermarkFontSize(220));
+    assert.ok(stripWidth > 220);
+    assert.ok(stripWidth >= estimateTextWidthPx(label, fontSize));
+    assert.equal(stripWidth % 2, 0);
+    const filter = buildStackedWatermarkFilterComplex({ label, logoWidth: 220 });
+    assert.match(filter, new RegExp(`pad=w=${stripWidth}:`));
+  });
+
+  it('shrinks the username font once the strip hits its max width', () => {
+    const label = '@' + 'a_very_long_username'.repeat(2);
+    const { stripWidth, fontSize } = watermarkStripLayout(label, 220);
+    assert.ok(fontSize < watermarkFontSize(220));
+    assert.ok(stripWidth <= 220 * WATERMARK_MAX_STRIP_RATIO);
+    assert.ok(estimateTextWidthPx(label, fontSize) <= stripWidth);
   });
 
   it('pads transparent row below logo for username', () => {

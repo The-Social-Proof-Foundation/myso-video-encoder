@@ -1,9 +1,10 @@
 /**
- * Export end card: animated logo clip placed top-middle, creator username + dripdrop wordmark
+ * Export end card: animated logo clip settling in the center of the frame, creator username + dripdrop wordmark
  * at the bottom.
  * Pure layout and variant selection so the ffmpeg graph stays testable.
  */
 import { even } from './ladder';
+import { fitFontSize } from './textMetrics';
 
 /** Background color of the end card; the logo is the opposite color. */
 export type EndCardVariant = 'black' | 'white';
@@ -37,15 +38,19 @@ export const END_CARD_CLIP = {
   motionBottom: 1402,
 } as const;
 
-/** Settled-logo center as a fraction of frame height (upper third, eye line). */
-export const END_CARD_LOGO_CENTER_Y = 0.3;
+/** Settled-logo center as a fraction of frame height (vertical middle). */
+export const END_CARD_LOGO_CENTER_Y = 0.5;
 /** Settled-logo width cap as a fraction of frame width. */
 export const END_CARD_LOGO_MAX_WIDTH = 0.5;
 /**
  * Final size multiplier applied after the fit constraints above. The fitted logo read too
- * large on the card, so it is rendered at half the size the constraints would allow.
+ * large on the card, so it is rendered well under the size the constraints would allow.
  */
-export const END_CARD_LOGO_SCALE = 0.5;
+export const END_CARD_LOGO_SCALE = 0.36;
+/** Wordmark height as a fraction of min(width, height). */
+export const END_CARD_WORDMARK_HEIGHT = 0.058;
+/** Username may span at most this fraction of frame width; longer names get a smaller font. */
+export const END_CARD_USERNAME_MAX_WIDTH = 0.88;
 
 export const END_CARD_BRIGHT_YAVG = 128;
 
@@ -61,13 +66,20 @@ export interface EndCardLayout {
   wordmarkY: number;
 }
 
-export function computeEndCardLayout(width: number, height: number): EndCardLayout {
+export function computeEndCardLayout(
+  width: number,
+  height: number,
+  label?: string,
+): EndCardLayout {
   const base = Math.min(width, height);
-  const usernameFontSize = Math.max(12, Math.round(base * 0.044));
-  const wordmarkHeight = even(Math.max(8, base * 0.03));
+  const preferredFont = Math.max(12, Math.round(base * 0.044));
+  const usernameFontSize = label
+    ? fitFontSize(label, preferredFont, width * END_CARD_USERNAME_MAX_WIDTH, 12)
+    : preferredFont;
+  const wordmarkHeight = even(Math.max(8, base * END_CARD_WORDMARK_HEIGHT));
   const wordmarkWidth = even(wordmarkHeight * END_CARD_WORDMARK_ASPECT);
   const bottomPad = Math.round(height * 0.05);
-  const lineGap = Math.round(usernameFontSize * 0.25);
+  const lineGap = Math.round(preferredFont * 0.35);
   const wordmarkY = height - bottomPad - wordmarkHeight;
   const usernameY = wordmarkY - lineGap - usernameFontSize;
 

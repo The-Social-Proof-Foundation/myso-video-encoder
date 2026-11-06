@@ -22,6 +22,8 @@ import {
   parseAverageYavg,
 } from './endCardLayout';
 import { fpsFilterValue, gopFramesForFps, normalizeFps } from './probe';
+import { even } from './ladder';
+import { estimateTextWidthPx, fitFontSize } from './textMetrics';
 
 const execFileAsync = promisify(execFile);
 
@@ -69,6 +71,27 @@ export function watermarkFontSize(logoWidth: number): number {
   return Math.round(20 * (logoWidth / 160));
 }
 
+/** The strip may grow past the logo up to this multiple of logo width; longer names shrink. */
+export const WATERMARK_MAX_STRIP_RATIO = 2;
+/** Transparent margin each side of the username inside the strip (px). */
+export const WATERMARK_TEXT_MARGIN_PX = 6;
+
+/**
+ * Strip width and username font size so the full label fits: the strip widens (logo stays
+ * centered) for long names, and past WATERMARK_MAX_STRIP_RATIO the font shrinks instead.
+ */
+export function watermarkStripLayout(
+  label: string,
+  logoWidth: number,
+): { stripWidth: number; fontSize: number } {
+  const margin = WATERMARK_TEXT_MARGIN_PX;
+  const maxText = logoWidth * WATERMARK_MAX_STRIP_RATIO - 2 * margin;
+  const fontSize = fitFontSize(label, watermarkFontSize(logoWidth), maxText, 12);
+  const textWidth = estimateTextWidthPx(label, fontSize);
+  const stripWidth = even(Math.max(logoWidth, textWidth + 2 * margin));
+  return { stripWidth, fontSize };
+}
+
 /** Stacked brand PNG + centered username row for FFmpeg filter_complex. */
 export function buildStackedWatermarkFilterComplex(params: {
   label: string;
@@ -80,10 +103,10 @@ export function buildStackedWatermarkFilterComplex(params: {
   const font = params.fontArg ?? '';
   const w = params.logoWidth;
   const rowPx = params.usernameRowPx ?? WATERMARK_USERNAME_ROW_PX;
-  const fontSize = watermarkFontSize(w);
+  const { stripWidth, fontSize } = watermarkStripLayout(params.label, w);
   return (
     `[0:v]format=rgba,scale=${w}:-1:flags=lanczos+accurate_rnd[logo];` +
-    `[logo]pad=w=iw:h=ih+${rowPx}:x=0:y=0:color=0x00000000[stacked];` +
+    `[logo]pad=w=${stripWidth}:h=ih+${rowPx}:x=(ow-iw)/2:y=0:color=0x00000000[stacked];` +
     `[stacked]drawtext=text='${label}'${font}:` +
     `fontcolor=white@0.92:fontsize=${fontSize}:` +
     `x=(w-text_w)/2:y=h-28:` +
@@ -245,7 +268,7 @@ export function buildEndCardFfmpegArgs(params: {
     '-filter_complex',
     buildEndCardFilterComplex({
       variant: params.variant,
-      layout: computeEndCardLayout(w, h),
+      layout: computeEndCardLayout(w, h, params.label),
       label: params.label,
       width: w,
       height: h,
